@@ -5,44 +5,88 @@
     <title>Test</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script id="siteContent" type="application/json"></script>
+    <script id="siteContent" type="application/json">
+      {
+        "funcs": [],
+        "nodes": [
+          {
+            "value": null,
+            "type": "node",
+            "funcName": "nodeUpdates",
+            "staticParams": {
+              "active": true,
+              "attributes": [
+                {
+                  "tag": "div",
+                  "id": "1",
+                  "parentId": "root"
+                },
+                {
+                  "tag": "div",
+                  "id": "2",
+                  "parentId": "1"
+                },
+                {
+                  "tag": "div",
+                  "id": "3",
+                  "parentId": "2"
+                },
+                {
+                  "tag": "div",
+                  "id": "4",
+                  "parentId": "3"
+                },
+                {
+                  "tag": "div",
+                  "id": "5",
+                  "parentId": "4"
+                }
+              ]
+            },
+            "nodeParams": {},
+            "nodeId": "root-dangle"
+          }
+        ]
+      }
+    </script>
     <script id="defaults" type="application/json">
       {
         "funcs": [
           {
-            "name": "nodeUpdate",
-            "body": "const nodeUpdate = ({active, attributes}) => ({\n  action: active? 'upsert':'delete',\n  ...attributes\n});",
+            "name": "nodeUpdates",
+            "body": "const nodeUpdates = ({active, attributes}) => attributes.map(attr => ({\n  action: active ? 'upsert' : 'delete',\n  ...attr\n}));",
             "params": [
               {
                 "name": "active",
                 "type": "boolean",
-                "description": "Whether to upsert or delete",
+                "description": "Whether to upsert or delete nodes",
                 "required": true
               },
               {
                 "name": "attributes",
-                "type": "object",
-                "description": "Node attributes",
+                "type": "array",
+                "description": "Array of node attributes",
                 "required": true
               }
             ],
             "functionType": "local",
-            "returnType": "object",
-            "description": "Creates DOM update operation"
+            "returnType": "array",
+            "description": "Creates multiple DOM update operations from an array of attributes"
           }
         ],
         "nodes": [
           {
             "value": null,
             "type": "node",
-            "funcName": "nodeUpdate",
+            "funcName": "nodeUpdates",
             "staticParams": {
               "active": true,
-              "attributes": {
-                "tag": "div",
-                "nodeId": "root"
-              }
+              "attributes": [
+                {
+                  "tag": "div",
+                  "id": "root"
+                }
+              ]
             },
             "nodeParams": {},
             "nodeId": "root"
@@ -664,65 +708,67 @@
           };
 
           const updateNodes = (operations = []) => {
-            requestAnimationFrame(() => {
-              operations.forEach(
-                ({
-                  nodeId,
-                  action,
-                  tag,
-                  parentId,
-                  listeners = {},
-                  ...rest
-                }) => {
-                  const el = document.getElementById(nodeId);
+            return new Promise((resolve) => {
+              requestAnimationFrame(() => {
+                operations.forEach(
+                  ({
+                    nodeId,
+                    action,
+                    tag,
+                    parentId,
+                    listeners = {},
+                    ...rest
+                  }) => {
+                    const el = document.getElementById(nodeId);
 
-                  switch (action) {
-                    case DOM_ACTION.DELETE: {
-                      if (!el) return;
+                    switch (action) {
+                      case DOM_ACTION.DELETE: {
+                        if (!el) return;
 
-                      getDownstreamNodes(nodeId)
-                        .filter((id) => {
-                          const node = getNode(id);
-                          return (
-                            node?.type === Types.PARAM_TYPES.DOM_NODE &&
-                            listeners[id]
+                        getDownstreamNodes(nodeId)
+                          .filter((id) => {
+                            const node = getNode(id);
+                            return (
+                              node?.type === Types.PARAM_TYPES.DOM_NODE &&
+                              listeners[id]
+                            );
+                          })
+                          .forEach(cleanupListeners);
+
+                        el.remove();
+                        break;
+                      }
+
+                      case DOM_ACTION.UPDATE: {
+                        if (el) {
+                          Object.assign(el, rest);
+                        } else {
+                          const newEl = Object.assign(
+                            document.createElement(tag),
+                            rest
                           );
-                        })
-                        .forEach(cleanupListeners);
+                          const parent =
+                            document.getElementById(parentId) || document.body;
+                          parent.appendChild(newEl);
+                        }
 
-                      el.remove();
-                      break;
-                    }
-
-                    case DOM_ACTION.UPDATE: {
-                      if (el) {
-                        Object.assign(el, rest);
-                      } else {
-                        const newEl = Object.assign(
-                          document.createElement(tag),
-                          rest
-                        );
-
-                        const parent =
-                          document.getElementById(parentId) || document.body;
-                        parent.appendChild(newEl);
+                        if (listeners) {
+                          Object.entries(listeners).forEach(
+                            ([event, ...listenerConfig]) => {
+                              attachEventListener(el, event, ...listenerConfig);
+                            }
+                          );
+                        }
+                        break;
                       }
 
-                      if (listeners) {
-                        Object.entries(listeners).forEach(
-                          ([event, ...listenerConfig]) => {
-                            attachEventListener(el, event, ...listenerConfig);
-                          }
-                        );
-                      }
-                      break;
+                      default:
+                        throw new Error(`Invalid DOM operation: ${action}`);
                     }
-
-                    default:
-                      throw new Error(`Invalid DOM operation: ${action}`);
                   }
-                }
-              );
+                );
+                resolve();
+              });
             });
           };
 
@@ -757,10 +803,11 @@
               const updates = await processDirtyNodes(level);
               return [...(await acc), ...updates];
             }, Promise.resolve([]));
-            DOMUpdator.updateNodes(
+
+            await DOMUpdator.updateNodes(
               nodes
                 .filter((node) => node.type === Types.PARAM_TYPES.DOM_NODE)
-                .map((node) => node.value)
+                .flatMap((node) => node.value)
             );
           };
 
