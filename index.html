@@ -4,899 +4,915 @@
     <meta charset="UTF-8" />
     <title>Test</title>
   </head>
-  <body>
-    <script id="siteContent" type="application/json">
-      {
-        "funcs": [],
-        "nodes": [
-          {
-            "value": null,
-            "type": "node",
-            "funcName": "nodeUpdates",
-            "staticParams": {
-              "active": true,
-              "attributes": [
-                {
-                  "tag": "div",
-                  "id": "1",
-                  "parentId": "root"
-                },
-                {
-                  "tag": "div",
-                  "id": "2",
-                  "parentId": "1"
-                },
-                {
-                  "tag": "div",
-                  "id": "3",
-                  "parentId": "2"
-                },
-                {
-                  "tag": "div",
-                  "id": "4",
-                  "parentId": "3"
-                },
-                {
-                  "tag": "div",
-                  "id": "5",
-                  "parentId": "4"
-                }
-              ]
+  <body></body>
+  <script id="siteContent" type="application/json">
+    {
+      "siteContent": []
+    }
+  </script>
+  <script id="defaults" type="application/json">
+    {
+      "funcs": [
+        {
+          "name": "nodeUpdates",
+          "body": "const nodeUpdates = ({active, attributes}) => attributes.map(attr => ({\n  action: active ? 'upsert' : 'delete',\n  ...attr\n}));",
+          "params": [
+            {
+              "name": "active",
+              "type": "boolean",
+              "description": "Whether to upsert or delete nodes",
+              "required": true
             },
-            "nodeParams": {},
-            "nodeId": "root-dangle"
-          }
-        ]
-      }
-    </script>
-    <script id="defaults" type="application/json">
-      {
-        "funcs": [
-          {
-            "name": "nodeUpdates",
-            "body": "const nodeUpdates = ({active, attributes}) => attributes.map(attr => ({\n  action: active ? 'upsert' : 'delete',\n  ...attr\n}));",
-            "params": [
+            {
+              "name": "attributes",
+              "type": "array",
+              "description": "Array of node attributes",
+              "required": true
+            }
+          ],
+          "funcType": "local",
+          "returnType": "array",
+          "description": "Creates multiple DOM update operations from an array of attributes"
+        }
+      ],
+      "nodes": [
+        {
+          "value": null,
+          "type": "node",
+          "funcName": "nodeUpdates",
+          "staticParams": {
+            "active": true,
+            "attributes": [
               {
-                "name": "active",
-                "type": "boolean",
-                "description": "Whether to upsert or delete nodes",
-                "required": true
-              },
-              {
-                "name": "attributes",
-                "type": "array",
-                "description": "Array of node attributes",
-                "required": true
+                "tag": "div",
+                "id": "root"
               }
-            ],
-            "functionType": "local",
-            "returnType": "array",
-            "description": "Creates multiple DOM update operations from an array of attributes"
+            ]
+          },
+          "nodeParams": {},
+          "nodeId": "root"
+        }
+      ]
+    }
+  </script>
+  <script>
+    const StateManager = (() => {
+      const Types = (() => {
+        const PARAM_TYPES = {
+          STRING: "string",
+          NUMBER: "number",
+          BOOLEAN: "boolean",
+          OBJECT: "object",
+          ARRAY: "array",
+          ANY: "any",
+          DATE: "date",
+          DOM_NODE: "node",
+          EVENT: "event",
+        };
+
+        const inferType = (value) => {
+          if (value === null) return null;
+          if (value === undefined) return value;
+          if (Array.isArray(value)) return PARAM_TYPES.ARRAY;
+          if (typeof value === PARAM_TYPES.OBJECT) {
+            if (value instanceof Date) return PARAM_TYPES.DATE;
+            return PARAM_TYPES.OBJECT;
           }
-        ],
-        "nodes": [
-          {
-            "value": null,
-            "type": "node",
-            "funcName": "nodeUpdates",
-            "staticParams": {
-              "active": true,
-              "attributes": [
-                {
-                  "tag": "div",
-                  "id": "root"
-                }
-              ]
-            },
-            "nodeParams": {},
-            "nodeId": "root"
+          if (
+            [
+              PARAM_TYPES.STRING,
+              PARAM_TYPES.NUMBER,
+              PARAM_TYPES.BOOLEAN,
+            ].includes(typeof value)
+          ) {
+            return typeof value;
           }
-        ]
-      }
-    </script>
-    <script>
-      const nodeUpdate = ({ active, attributes }) => ({
-        action: active,
-        ...attributes,
-      });
-    </script>
-    <script>
-      const StateManager = (() => {
-        const Types = (() => {
-          const PARAM_TYPES = {
-            STRING: "string",
-            NUMBER: "number",
-            BOOLEAN: "boolean",
-            OBJECT: "object",
-            ARRAY: "array",
-            ANY: "any",
-            DATE: "date",
-            DOM_NODE: "node",
-            EVENT: "event",
-          };
+          return PARAM_TYPES.ANY;
+        };
 
-          const inferType = (value) => {
-            if (value === null) return null;
-            if (value === undefined) return value;
-            if (Array.isArray(value)) return PARAM_TYPES.ARRAY;
-            if (typeof value === PARAM_TYPES.OBJECT) {
-              if (value instanceof Date) return PARAM_TYPES.DATE;
-              return PARAM_TYPES.OBJECT;
-            }
-            if (
-              [
-                PARAM_TYPES.STRING,
-                PARAM_TYPES.NUMBER,
-                PARAM_TYPES.BOOLEAN,
-              ].includes(typeof value)
-            ) {
-              return typeof value;
-            }
-            return PARAM_TYPES.ANY;
-          };
+        return {
+          PARAM_TYPES,
+          inferType,
+        };
+      })();
 
-          return {
-            PARAM_TYPES,
-            inferType,
-          };
-        })();
+      const FunctionRegistry = (() => {
+        const functions = {};
+        const lambdaCache = {};
 
-        const FunctionRegistry = (() => {
-          const functions = {};
-          const lambdaCache = {};
+        const FUNCTION_TYPE = {
+          DATA_LOADING: "dataLoading",
+          VOLATILE: "volatile",
+          LOCAL: "local",
+          SELFREF: "selfRef",
+        };
 
-          const FUNCTION_TYPE = {
-            DATA_LOADING: "dataLoading",
-            VOLATILE: "volatile",
-            LOCAL: "local",
-          };
+        const createParam = ({
+          name,
+          description,
+          type = Types.PARAM_TYPES.ANY,
+          required = true,
+          defaultValue = null,
+        }) => ({
+          name,
+          type,
+          required,
+          default: defaultValue,
+        });
 
-          const createParam = ({
-            name,
-            description,
-            type = Types.PARAM_TYPES.ANY,
-            required = true,
-            defaultValue = null,
-          }) => ({
-            name,
-            type,
-            required,
-            default: defaultValue,
-          });
+        const createLambda = (funcName, staticParams = {}, async = false) => {
+          const { params, funcType, body, name } = getFuncDef(funcName);
 
-          const createLambda = (funcName, staticParams = {}, async = false) => {
-            const { params, funcType, body, name } = getFuncDef(funcName);
+          const allParamSet = new Set(Object.keys(params));
+          const dynamicParams = Array.from(allParamSet).filter(
+            (p) => !(p in staticParams)
+          );
 
-            const allParamSet = new Set(Object.keys(params));
-            const dynamicParams = Array.from(allParamSet).filter(
-              (p) => !(p in staticParams)
+          const bodyParts = [];
+
+          if (Object.keys(staticParams).length) {
+            bodyParts.push(
+              Object.entries(staticParams)
+                .map(([key, val]) => `const ${key} = ${JSON.stringify(val)};`)
+                .join("\n")
             );
+          }
 
-            const bodyParts = [];
+          bodyParts.push(
+            `const {${dynamicParams.join(",")}} = arguments[0] || {};`
+          );
 
-            if (Object.keys(staticParams).length) {
-              bodyParts.push(
-                Object.entries(staticParams)
-                  .map(([key, val]) => `const ${key} = ${JSON.stringify(val)};`)
-                  .join("\n")
-              );
-            }
+          bodyParts.push(body);
 
-            bodyParts.push(body);
+          if (async) {
+            bodyParts.push(
+              `return async () => await ${name}(${Array.from(allParamSet).join(
+                ","
+              )});`
+            );
+          } else {
+            bodyParts.push(
+              `return ${name}({${Array.from(allParamSet).join(",")}});`
+            );
+          }
 
-            if (async) {
-              bodyParts.push(
-                `return async () => await ${name}(${Array.from(
-                  allParamSet
-                ).join(",")});`
-              );
-            } else {
-              bodyParts.push(
-                `return ${name}({${Array.from(allParamSet).join(",")}});`
-              );
-            }
+          return new Function("params", bodyParts.join("\n"));
+        };
 
-            return new Function(...dynamicParams, bodyParts.join("\n"));
-          };
-
-          const initLambda = (nodeId, cacheKey, funcName, staticParams) => {
-            const cached = lambdaCache[cacheKey];
-            if (cached) {
-              cached.nodeIds.push(nodeId);
-              return {
-                cacheKey,
-                funcType: cached.funcType,
-              };
-            }
-
-            const { funcType, async } = getFuncDef(funcName);
-
-            lambdaCache[cacheKey] = {
-              lambda: createLambda(funcName, staticParams, async),
-              nodeIds: [nodeId],
-              funcType,
+        const initLambda = (nodeId, cacheKey, funcName, staticParams) => {
+          const cached = lambdaCache[cacheKey];
+          if (cached) {
+            cached.nodeIds.push(nodeId);
+            return {
+              cacheKey,
+              funcType: cached.funcType,
             };
+          }
 
-            return { cacheKey, funcType };
+          const { funcType, async } = getFuncDef(funcName);
+
+          lambdaCache[cacheKey] = {
+            lambda: createLambda(funcName, staticParams, async),
+            nodeIds: [nodeId],
+            funcType,
           };
 
-          const getFuncDef = (funcName) => {
-            if (!functions[funcName]) {
-              throw new Error(`Function ${funcName} is not defined`);
-            }
-            return functions[funcName];
-          };
+          return { cacheKey, funcType };
+        };
 
-          const removeNodeFromLambda = (lambda, nodeId) => {
-            lambda.nodeIds = lambda.nodeIds.filter((id) => id !== nodeId);
-            return lambda.nodeIds.length === 0;
-          };
+        const getFuncDef = (funcName) => {
+          if (!functions[funcName]) {
+            throw new Error(`Function ${funcName} is not defined`);
+          }
+          return functions[funcName];
+        };
 
-          const registerFunction = ({
+        const removeNodeFromLambda = (lambda, nodeId) => {
+          lambda.nodeIds = lambda.nodeIds.filter((id) => id !== nodeId);
+          return lambda.nodeIds.length === 0;
+        };
+
+        const registerFunction = ({
+          name,
+          body,
+          async = true,
+          params = [],
+          returnType = PARAM_TYPES.ANY,
+          funcType = FUNCTION_TYPE.LOCAL,
+          description = "",
+        }) => {
+          if (!name || !body) {
+            throw new Error("Function name and body are required");
+          }
+          const processedParams = Object.fromEntries(
+            params.map((param) => [param.name, createParam(param)])
+          );
+          const functionDefinition = {
             name,
             body,
-            async = true,
-            params = [],
-            returnType = PARAM_TYPES.ANY,
-            funcType = FUNCTION_TYPE.LOCAL,
-            description = "",
-          }) => {
-            if (!name || !body) {
-              throw new Error("Function name and body are required");
-            }
-            const processedParams = Object.fromEntries(
-              params.map((param) => [param.name, createParam(param)])
-            );
-            const functionDefinition = {
-              name,
-              body,
-              params: processedParams,
-              returnType,
-              funcType,
-              description,
-            };
-            functions[name] = functionDefinition;
-            return functionDefinition;
+            params: processedParams,
+            returnType,
+            funcType,
+            description,
           };
+          functions[name] = functionDefinition;
+          return functionDefinition;
+        };
 
-          const registerLambda = (nodeId, funcName, staticParams = {}) => {
-            const paramKey =
-              Object.keys(staticParams).length > 0
-                ? JSON.stringify(staticParams)
-                : "";
-            const cacheKey = `${funcName}_${paramKey}`;
-            return initLambda(nodeId, cacheKey, funcName, staticParams);
-          };
+        const registerLambda = (nodeId, funcName, staticParams = {}) => {
+          const paramKey =
+            Object.keys(staticParams).length > 0
+              ? JSON.stringify(staticParams)
+              : "";
+          const cacheKey = `${funcName}_${paramKey}`;
+          return initLambda(nodeId, cacheKey, funcName, staticParams);
+        };
 
-          const deRegisterLambda = (cacheKey, nodeId) => {
-            const lambda = lambdaCache[cacheKey];
+        const deRegisterLambda = (cacheKey, nodeId) => {
+          const lambda = lambdaCache[cacheKey];
 
-            if (!lambda) {
-              throw new Error(`Lambda ${cacheKey} is not defined`);
-            }
+          if (!lambda) {
+            throw new Error(`Lambda ${cacheKey} is not defined`);
+          }
 
-            if (removeNodeFromLambda(lambda, nodeId)) {
-              delete lambdaCache[cacheKey];
-              return true;
-            }
+          if (removeNodeFromLambda(lambda, nodeId)) {
+            delete lambdaCache[cacheKey];
+            return true;
+          }
 
-            return false;
-          };
+          return false;
+        };
 
-          return {
-            registerFunction,
-            registerLambda,
-            deRegisterLambda,
-            FUNCTION_TYPE,
-            getLambda: (cacheKey) => lambdaCache[cacheKey],
-          };
-        })();
+        return {
+          registerFunction,
+          registerLambda,
+          deRegisterLambda,
+          FUNCTION_TYPE,
+          getLambda: (cacheKey) => lambdaCache[cacheKey],
+        };
+      })();
 
-        const DependencyGraph = (() => {
-          const Graph = {
-            outbound: new Map(),
-            inbound: new Map(),
-            topology: [],
-          };
+      const DependencyGraph = (() => {
+        const Graph = {
+          outbound: new Map(),
+          inbound: new Map(),
+          topology: [],
+        };
 
-          const hasCycle = (
-            startId,
-            visited = new Set(),
-            stack = new Set(),
-            path = []
-          ) => {
-            if (stack.has(startId)) {
-              const cycleStart = path.indexOf(startId);
-              return { hasCycle: true, cyclePath: path.slice(cycleStart) };
-            }
-            if (visited.has(startId)) return { hasCycle: false };
+        const hasCycle = (
+          startId,
+          visited = new Set(),
+          stack = new Set(),
+          path = []
+        ) => {
+          if (stack.has(startId)) {
+            const cycleStart = path.indexOf(startId);
+            return { hasCycle: true, cyclePath: path.slice(cycleStart) };
+          }
+          if (visited.has(startId)) return { hasCycle: false };
 
-            visited.add(startId);
-            stack.add(startId);
-            path.push(startId);
+          visited.add(startId);
+          stack.add(startId);
+          path.push(startId);
 
-            const outEdges = Graph.outbound.get(startId) || new Set();
-            for (const neighbor of outEdges) {
-              const result = hasCycle(neighbor, visited, stack, path);
-              if (result.hasCycle) return result;
-            }
+          const outEdges = Graph.outbound.get(startId) || new Set();
+          for (const neighbor of outEdges) {
+            const result = hasCycle(neighbor, visited, stack, path);
+            if (result.hasCycle) return result;
+          }
 
-            stack.delete(startId);
-            path.pop();
-            return { hasCycle: false };
-          };
+          stack.delete(startId);
+          path.pop();
+          return { hasCycle: false };
+        };
 
-          const updateTopologicalLevels = () => {
-            const visited = new Set();
-            const levels = [];
-            const inProcess = new Set();
+        const updateTopologicalLevels = () => {
+          const visited = new Set();
+          const levels = [];
+          const inProcess = new Set();
 
-            const sourceNodes = Array.from(Graph.outbound.keys()).filter(
-              (nodeId) => !Graph.inbound.has(nodeId)
-            );
+          const sourceNodes = Array.from(Graph.outbound.keys()).filter(
+            (nodeId) => !Graph.inbound.has(nodeId)
+          );
 
-            if (sourceNodes.length > 0) {
-              levels.push(sourceNodes);
-            }
+          if (sourceNodes.length > 0) {
+            levels.push(sourceNodes);
+          }
 
-            let currentLevel = sourceNodes;
+          let currentLevel = sourceNodes;
 
-            while (currentLevel.length > 0) {
-              const nextLevel = new Set();
+          while (currentLevel.length > 0) {
+            const nextLevel = new Set();
 
-              for (const node of currentLevel) {
-                if (!visited.has(node)) {
-                  visited.add(node);
-                  const outEdges = Graph.outbound.get(node) || new Set();
+            for (const node of currentLevel) {
+              if (!visited.has(node)) {
+                visited.add(node);
+                const outEdges = Graph.outbound.get(node) || new Set();
 
-                  for (const target of outEdges) {
-                    if (
-                      target !== null &&
-                      !visited.has(target) &&
-                      !inProcess.has(target)
-                    ) {
-                      const inEdges = Graph.inbound.get(target) || new Set();
-                      if (
-                        Array.from(inEdges).every((dep) => visited.has(dep))
-                      ) {
-                        nextLevel.add(target);
-                        inProcess.add(target);
-                      }
-                    }
-                  }
-                }
-              }
-
-              if (nextLevel.size > 0) {
-                levels.push(Array.from(nextLevel));
-              }
-              currentLevel = Array.from(nextLevel);
-            }
-
-            Graph.levels = levels;
-          };
-
-          const addEdge = (fromId, toId = null) => {
-            if (!Graph.outbound.has(fromId)) {
-              Graph.outbound.set(fromId, new Set());
-            }
-            Graph.outbound.get(fromId).add(toId);
-
-            if (toId !== null) {
-              if (!Graph.inbound.has(toId)) {
-                Graph.inbound.set(toId, new Set());
-              }
-              Graph.inbound.get(toId).add(fromId);
-            }
-
-            const cycleCheck = hasCycle(fromId);
-            if (cycleCheck.hasCycle) {
-              removeEdge(fromId, toId);
-              throw new Error(
-                `Cycle detected: ${cycleCheck.cyclePath.join(" -> ")}`
-              );
-            }
-
-            updateTopologicalLevels();
-            return cycleCheck;
-          };
-
-          const registerDownStreamEdges = (nodeId, downstreamNodes) => {
-            if (downstreamNodes) {
-              downstreamNodes.forEach((targetNode) => {
-                try {
-                  addEdge(nodeId, targetNode);
-                } catch (error) {
-                  console.error(
-                    `Failed to add edge from ${nodeId} to ${targetNode}: ${error.message}`
-                  );
-                }
-              });
-            } else {
-              addEdge(nodeId, null);
-            }
-          };
-
-          const removeEdge = (fromId, toId) => {
-            if (Graph.outbound.has(fromId)) {
-              const outEdges = Graph.outbound.get(fromId);
-              outEdges.delete(toId);
-              if (outEdges.size === 0) {
-                Graph.outbound.delete(fromId);
-              }
-            }
-
-            if (toId !== null && Graph.inbound.has(toId)) {
-              const inEdges = Graph.inbound.get(toId);
-              inEdges.delete(fromId);
-              if (inEdges.size === 0) {
-                Graph.inbound.delete(toId);
-              }
-            }
-
-            updateTopologicalLevels();
-          };
-
-          const getDownstreamTopology = (nodeId) => {
-            const visited = new Set();
-            const levels = [];
-            let currentLevel = new Set([nodeId]);
-
-            while (currentLevel.size > 0) {
-              const nextLevel = new Set();
-
-              for (const current of currentLevel) {
-                if (!visited.has(current)) {
-                  visited.add(current);
-                  const outEdges = Graph.outbound.get(current) || new Set();
-
-                  for (const target of outEdges) {
-                    if (target !== null && !visited.has(target)) {
+                for (const target of outEdges) {
+                  if (
+                    target !== null &&
+                    !visited.has(target) &&
+                    !inProcess.has(target)
+                  ) {
+                    const inEdges = Graph.inbound.get(target) || new Set();
+                    if (Array.from(inEdges).every((dep) => visited.has(dep))) {
                       nextLevel.add(target);
+                      inProcess.add(target);
                     }
                   }
                 }
               }
-
-              if (currentLevel.size > 0) {
-                levels.push(Array.from(currentLevel));
-              }
-              currentLevel = nextLevel;
             }
 
-            return levels;
-          };
+            if (nextLevel.size > 0) {
+              levels.push(Array.from(nextLevel));
+            }
+            currentLevel = Array.from(nextLevel);
+          }
 
-          const getDownstreamNodes = (nodeId) => {
-            const visited = new Set();
-            const queue = [nodeId];
+          Graph.levels = levels;
+        };
 
-            while (queue.length > 0) {
-              const current = queue.shift();
-              if (visited.has(current)) continue;
-              visited.add(current);
-              const outEdges = Graph.outbound.get(current) || new Set();
-              for (const target of outEdges) {
-                if (target !== null && !visited.has(target)) {
-                  queue.push(target);
+        const addEdge = (fromId, toId) => {
+          if (!Graph.outbound.has(fromId)) {
+            Graph.outbound.set(fromId, new Set());
+          }
+          Graph.outbound.get(fromId).add(toId);
+
+          if (!Graph.inbound.has(toId)) {
+            Graph.inbound.set(toId, new Set());
+          }
+          Graph.inbound.get(toId).add(fromId);
+
+          const cycleCheck = hasCycle(fromId);
+          if (cycleCheck.hasCycle) {
+            removeEdge(fromId, toId);
+            throw new Error(
+              `Cycle detected: ${cycleCheck.cyclePath.join(" -> ")}`
+            );
+          }
+
+          updateTopologicalLevels();
+          return cycleCheck;
+        };
+
+        const registerUpStreamEdges = (nodeId, upStreamNodes) => {
+          if (upStreamNodes) {
+            upStreamNodes.forEach((targetNode) => {
+              try {
+                addEdge(targetNode, nodeId);
+              } catch (error) {
+                console.error(
+                  `Failed to add edge from ${targetNode} to ${nodeId}: ${error.message}`
+                );
+              }
+            });
+          } else {
+            addEdge(null, nodeId);
+          }
+        };
+
+        const removeEdge = (fromId, toId) => {
+          if (Graph.outbound.has(fromId)) {
+            const outEdges = Graph.outbound.get(fromId);
+            outEdges.delete(toId);
+            if (outEdges.size === 0) {
+              Graph.outbound.delete(fromId);
+            }
+          }
+
+          if (toId !== null && Graph.inbound.has(toId)) {
+            const inEdges = Graph.inbound.get(toId);
+            inEdges.delete(fromId);
+            if (inEdges.size === 0) {
+              Graph.inbound.delete(toId);
+            }
+          }
+
+          updateTopologicalLevels();
+        };
+
+        const getDownstreamTopology = (nodeId) => {
+          const visited = new Set();
+          const levels = [];
+          let currentLevel = new Set([nodeId]);
+
+          while (currentLevel.size > 0) {
+            const nextLevel = new Set();
+
+            for (const current of currentLevel) {
+              if (!visited.has(current)) {
+                visited.add(current);
+                const outEdges = Graph.outbound.get(current) || new Set();
+
+                for (const target of outEdges) {
+                  if (target !== null && !visited.has(target)) {
+                    nextLevel.add(target);
+                  }
                 }
               }
             }
-            return Array.from(visited);
-          };
 
-          const removeNodeFromGraph = (nodeId) => {
-            if (Graph.outbound.has(nodeId)) {
-              const outEdges = Graph.outbound.get(nodeId);
-              for (const targetNode of outEdges) {
-                removeEdge(nodeId, targetNode);
+            if (currentLevel.size > 0) {
+              levels.push(Array.from(currentLevel));
+            }
+            currentLevel = nextLevel;
+          }
+
+          return levels;
+        };
+
+        const getDownstreamNodes = (nodeId) => {
+          const visited = new Set();
+          const queue = [nodeId];
+
+          while (queue.length > 0) {
+            const current = queue.shift();
+            if (visited.has(current)) continue;
+            visited.add(current);
+            const outEdges = Graph.outbound.get(current) || new Set();
+            for (const target of outEdges) {
+              if (target !== null && !visited.has(target)) {
+                queue.push(target);
               }
             }
+          }
+          return Array.from(visited);
+        };
 
-            if (Graph.inbound.has(nodeId)) {
-              const inEdges = Graph.inbound.get(nodeId);
-              for (const sourceNode of inEdges) {
-                removeEdge(sourceNode, nodeId);
-              }
+        const removeNodeFromGraph = (nodeId) => {
+          if (Graph.outbound.has(nodeId)) {
+            const outEdges = Graph.outbound.get(nodeId);
+            for (const targetNode of outEdges) {
+              removeEdge(nodeId, targetNode);
             }
-          };
+          }
 
-          return {
-            getGraphs: () => Graph,
-            addEdge,
-            removeEdge,
-            removeNodeFromGraph,
-            getDownstreamTopology,
-            getDownstreamNodes,
-            registerDownStreamEdges,
-          };
-        })();
+          if (Graph.inbound.has(nodeId)) {
+            const inEdges = Graph.inbound.get(nodeId);
+            for (const sourceNode of inEdges) {
+              removeEdge(sourceNode, nodeId);
+            }
+          }
+        };
 
-        const NodeStore = (() => {
-          const nodes = {};
+        return {
+          getGraphs: () => Graph,
+          addEdge,
+          removeEdge,
+          removeNodeFromGraph,
+          getDownstreamTopology,
+          getDownstreamNodes,
+          registerUpStreamEdges,
+        };
+      })();
 
-          const createNode = ({
+      const NodeStore = (() => {
+        const nodes = {};
+
+        const createNode = ({
+          nodeId,
+          value,
+          type = Types.inferType(value),
+          queueAction = Calculator.actionTypes.UPSERT,
+          dirty = true,
+          funcName = null,
+          staticParams = {},
+          nodeParams = {},
+        }) => {
+          if (nodeId in nodes) {
+            throw new Error(`Node ${nodeId} already exists`);
+          }
+          const nodeData = {
             nodeId,
             value,
-            type = Types.inferType(value),
-            dirty = true,
-            funcName = null,
-            staticParams = {},
-            nodeParams = {},
-          }) => {
-            if (nodeId in nodes) {
-              throw new Error(`Node ${nodeId} already exists`);
-            }
-            const nodeData = {
-              nodeId,
-              value,
-              type,
-              dirty,
-              func: null,
-            };
-
-            DependencyGraph.registerDownStreamEdges(
-              nodeId,
-              Object.values(nodeParams)
-            );
-
-            if (funcName) {
-              const { cacheKey, funcType } = FunctionRegistry.registerLambda(
-                nodeId,
-                funcName,
-                staticParams
-              );
-              const func = {
-                lambdaCacheKey: cacheKey,
-                funcType: funcType,
-                staticParams,
-                nodeParams: nodeParams,
-                nodeParamsCache: null,
-              };
-              nodeData.func = func;
-            }
-            nodes[nodeId] = nodeData;
-            return nodeId;
+            type,
+            dirty,
+            func: null,
           };
 
-          const dirtyNode = (nodeId) => {
-            const node = nodes[nodeId];
-            if (!node) {
-              throw new Error(`Node ${nodeId} is not defined`);
-            }
-            nodes[nodeId] = { ...node, dirty: true };
-          };
-
-          const compareNodeParams = (nodeParams, newNodeParams) => {
-            if (!nodeParams) return true;
-            return Object.entries(nodeParams).every(([key, value]) => {
-              return newNodeParams[key] === value;
-            });
-          };
-
-          const calculateNode = async (nodeId) => {
-            const node = nodes[nodeId];
-            if (!node) {
-              throw new Error(`Node ${nodeId} is not defined`);
-            }
-            if (!node.func) {
-              nodes[nodeId] = { ...node, dirty: false };
-              return node.value;
-            }
-            const { lambdaCacheKey, funcType } = node.func;
-            const { lambda } = FunctionRegistry.getLambda(lambdaCacheKey);
-            const newNodeParams = getNodeParams(node.func.nodeParams);
-            const updateNeeded = compareNodeParams(
-              node.func.nodeParamsCache,
-              newNodeParams
-            );
-            if (!updateNeeded) {
-              nodes[nodeId] = { ...node, dirty: false };
-              return node.value;
-            }
-            const combinedParams = {
-              ...node.func.staticParams,
-              ...newNodeParams,
-            };
-            const result = await lambda(combinedParams);
-            const newNode = { ...node, value: result };
-            switch (funcType) {
-              case FunctionRegistry.FUNCTION_TYPE.LOCAL:
-                newNode.dirty = false;
-                break;
-              case FunctionRegistry.FUNCTION_TYPE.VOLATILE:
-                newNode.dirty = true;
-                break;
-              case FunctionRegistry.FUNCTION_TYPE.DATA_LOADING:
-                throw new Error("Data loading functions are not implemented");
-            }
-            nodes[nodeId] = newNode;
-            return newNode;
-          };
-
-          const removeNode = (nodeId) => {
-            const node = nodes[nodeId];
-            if (node.func) {
-              FunctionRegistry.deRegisterLambda(
-                nodeId,
-                node.func.lambdaCacheKey
-              );
-            }
-            delete nodes[nodeId];
-            DependencyGraph.removeNodeFromGraph(nodeId);
-          };
-
-          const getNodeParams = (nodeParams) => {
-            return Object.fromEntries(
-              Object.entries(nodeParams).map(([key, value]) => {
-                const targetNode = getNode(value);
-                return [key, targetNode.value];
-              })
-            );
-          };
-
-          return {
-            createNode,
-            calculateNode,
-            getNode: (nodeId) => nodes[nodeId],
-            removeNode,
-            getNodes: () => nodes,
-            dirtyNode,
-          };
-        })();
-
-        const DOMUpdator = (() => {
-          const listeners = {};
-
-          const DOM_ACTION = {
-            UPDATE: "upsert",
-            DELETE: "delete",
-          };
-
-          const attachEventListener = (
-            el,
-            event,
+          DependencyGraph.registerUpStreamEdges(
             nodeId,
-            funcNodeId,
-            funcName,
-            staticParams = {},
-            nodeParams = {}
-          ) => {
-            const valueNode = NodeStore.createNode({
-              value: null,
-              type: Types.PARAM_TYPES.EVENT,
+            Object.values(nodeParams)
+          );
+
+          if (funcName) {
+            const { cacheKey, funcType } = FunctionRegistry.registerLambda(
               nodeId,
-            });
-            const functionNode = NodeStore.createNode({
-              value: null,
-              nodeId: funcNodeId,
               funcName,
-              funcType: FunctionRegistry.FUNCTION_TYPE.VOLATILE,
+              staticParams
+            );
+            const func = {
+              lambdaCacheKey: cacheKey,
+              funcType: funcType,
               staticParams,
-              nodeParams: {
-                ...nodeParams,
-                event: valueNode.nodeId,
-              },
-            });
-            const listenerCallback = (e) => {
-              NodeStore.enqueue(
-                {
-                  value: e,
-                  type: Types.PARAM_TYPES.EVENT,
-                  nodeId: valueNode.nodeId,
-                },
-                "update"
-              );
+              nodeParams: nodeParams,
+              nodeParamsCache: null,
             };
+            nodeData.func = func;
+          }
+          nodes[nodeId] = nodeData;
+        };
 
-            el.addEventListener(event, listenerCallback);
-            if (nodeId in listeners) {
-              listeners[nodeId].push({ event, listenerCallback });
-            } else {
-              listeners[nodeId] = [{ event, listenerCallback }];
-            }
+        const dirtyNode = (nodeId) => {
+          const node = nodes[nodeId];
+          if (!node) {
+            throw new Error(`Node ${nodeId} is not defined`);
+          }
+          nodes[nodeId] = { ...node, dirty: true };
+        };
 
-            return { valueNode, functionNode };
+        const compareNodeParams = (nodeParams, newNodeParams) => {
+          if (!nodeParams) return true;
+          return Object.entries(nodeParams).every(([key, value]) => {
+            return newNodeParams[key] === value;
+          });
+        };
+
+        const calculateNode = async (nodeId) => {
+          const node = nodes[nodeId];
+          if (!node) {
+            throw new Error(`Node ${nodeId} is not defined`);
+          }
+          if (!node.func) {
+            nodes[nodeId] = { ...node, dirty: false };
+            return node.value;
+          }
+          const { lambdaCacheKey, funcType } = node.func;
+          const { lambda } = FunctionRegistry.getLambda(lambdaCacheKey);
+          const newNodeParams = getNodeParams(node.func.nodeParams);
+          const updateNeeded = compareNodeParams(
+            node.func.nodeParamsCache,
+            newNodeParams
+          );
+          if (!updateNeeded) {
+            nodes[nodeId] = { ...node, dirty: false };
+            return node.value;
+          }
+
+          const combinedParams = {
+            ...node.func.staticParams,
+            ...newNodeParams,
+            ...(node.func.funcType === FunctionRegistry.FUNCTION_TYPE.SELFREF
+              ? node.value
+              : {}),
           };
 
-          const cleanupListeners = (nodeId) => {
-            if (nodeId in listeners) {
-              listeners[nodeId].forEach(({ event, listenerCallback }) =>
-                el.removeEventListener(event, listenerCallback)
-              );
-            }
-          };
+          const result = await lambda(combinedParams);
+          const newNode = { ...node, value: result };
+          switch (funcType) {
+            case FunctionRegistry.FUNCTION_TYPE.LOCAL:
+              newNode.dirty = false;
+              break;
+            case FunctionRegistry.FUNCTION_TYPE.VOLATILE:
+              newNode.dirty = true;
+              break;
+            case FunctionRegistry.FUNCTION_TYPE.DATA_LOADING:
+              throw new Error("Data loading functions are not implemented");
+          }
+          nodes[nodeId] = newNode;
+          return newNode;
+        };
 
-          const updateNodes = (operations = []) => {
-            return new Promise((resolve) => {
-              requestAnimationFrame(() => {
-                operations.forEach(
-                  ({
-                    nodeId,
-                    action,
-                    tag,
-                    parentId,
-                    listeners = {},
-                    ...rest
-                  }) => {
-                    const el = document.getElementById(nodeId);
+        const removeNode = (nodeId) => {
+          const node = nodes[nodeId];
+          if (node.func) {
+            FunctionRegistry.deRegisterLambda(nodeId, node.func.lambdaCacheKey);
+          }
+          delete nodes[nodeId];
+          DependencyGraph.removeNodeFromGraph(nodeId);
+        };
 
-                    switch (action) {
-                      case DOM_ACTION.DELETE: {
-                        if (!el) return;
+        const getNodeParams = (nodeParams) => {
+          return Object.fromEntries(
+            Object.entries(nodeParams).map(([key, value]) => {
+              const targetNode = nodes[value];
+              return [key, targetNode.value];
+            })
+          );
+        };
 
-                        getDownstreamNodes(nodeId)
-                          .filter((id) => {
-                            const node = getNode(id);
-                            return (
-                              node?.type === Types.PARAM_TYPES.DOM_NODE &&
-                              listeners[id]
-                            );
-                          })
-                          .forEach(cleanupListeners);
+        return {
+          createNode,
+          calculateNode,
+          getNode: (nodeId) => nodes[nodeId],
+          removeNode,
+          getNodes: () => nodes,
+          dirtyNode,
+        };
+      })();
 
-                        el.remove();
-                        break;
-                      }
+      const DOMUpdator = (() => {
+        const listeners = {};
 
-                      case DOM_ACTION.UPDATE: {
-                        if (el) {
-                          Object.assign(el, rest);
-                        } else {
-                          const newEl = Object.assign(
-                            document.createElement(tag),
-                            rest
-                          );
-                          const parent =
-                            document.getElementById(parentId) || document.body;
-                          parent.appendChild(newEl);
-                        }
+        const DOM_ACTION = {
+          UPSERT: "upsert",
+          DELETE: "delete",
+        };
 
-                        if (listeners) {
-                          Object.entries(listeners).forEach(
-                            ([event, ...listenerConfig]) => {
-                              attachEventListener(el, event, ...listenerConfig);
-                            }
-                          );
-                        }
-                        break;
-                      }
-
-                      default:
-                        throw new Error(`Invalid DOM operation: ${action}`);
-                    }
-                  }
-                );
-                resolve();
-              });
-            });
-          };
-
-          return { updateNodes };
-        })();
-
-        const Calculator = (() => {
-          let isProcessing = false;
-          const queue = [];
-          const QUEUE_ACTION = {
-            CREATE: "create",
-            UPDATE: "update",
-            DELETE: "delete",
-          };
-
-          const processDirtyNodes = async (level) => {
-            const results = await Promise.all(
-              level.map(async (nodeId) => {
-                const node = await NodeStore.calculateNode(nodeId);
-                return node;
-              })
-            );
-            return results;
-          };
-
-          const calculateFromNode = async (nodeId) => {
-            const topology = DependencyGraph.getDownstreamTopology(nodeId);
-
-            topology.flat().forEach((id) => NodeStore.dirtyNode(id));
-
-            const nodes = await topology.reduce(async (acc, level) => {
-              const updates = await processDirtyNodes(level);
-              return [...(await acc), ...updates];
-            }, Promise.resolve([]));
-
-            await DOMUpdator.updateNodes(
-              nodes
-                .filter((node) => node.type === Types.PARAM_TYPES.DOM_NODE)
-                .flatMap((node) => node.value)
-            );
-          };
-
-          const processQueue = async () => {
-            if (isProcessing) return;
-            isProcessing = true;
-            try {
-              while (queue.length) {
-                const { nodeConfig, action } = queue.shift();
-
-                switch (action) {
-                  case QUEUE_ACTION.CREATE:
-                    await calculateFromNode(NodeStore.createNode(nodeConfig));
-                    break;
-                  case QUEUE_ACTION.UPDATE:
-                    NodeStore.updateNode(nodeConfig.nodeId, {
-                      ...nodeConfig,
-                      type: Types.inferType(nodeConfig.value),
-                    });
-                    await calculateFromNode(nodeConfig.nodeId);
-                    break;
-                  case QUEUE_ACTION.DELETE:
-                    NodeStore.removeNode(nodeConfig.nodeId);
-                    break;
-                }
-              }
-            } finally {
-              isProcessing = false;
-            }
-          };
-
-          return {
-            enqueue: (nodeConfig, action) => {
-              queue.push({ nodeConfig, action });
-              processQueue();
+        const attachEventListener = (
+          el,
+          event,
+          nodeId,
+          funcNodeId,
+          funcName,
+          staticParams = {},
+          nodeParams = {}
+        ) => {
+          const valueNode = NodeStore.createNode({
+            value: null,
+            type: Types.PARAM_TYPES.EVENT,
+            nodeId,
+          });
+          const functionNode = NodeStore.createNode({
+            value: null,
+            nodeId: funcNodeId,
+            funcName,
+            funcType: FunctionRegistry.FUNCTION_TYPE.VOLATILE,
+            staticParams,
+            nodeParams: {
+              ...nodeParams,
+              event: valueNode.nodeId,
             },
-            isProcessing: () => isProcessing,
-            actionTypes: QUEUE_ACTION,
+          });
+          const listenerCallback = (e) => {
+            NodeStore.enqueue(
+              {
+                value: e,
+                type: Types.PARAM_TYPES.EVENT,
+                nodeId: valueNode.nodeId,
+              },
+              "upsert"
+            );
           };
-        })();
 
-        return {
-          enqueue: Calculator.enqueue,
-          createNode: NodeStore.createNode,
-          isProcessing: Calculator.isProcessing,
-          getNode: NodeStore.getNode,
-          getNodes: NodeStore.getNodes,
-          getGraphs: DependencyGraph.getGraphs,
-          getFunctions: FunctionRegistry.getFunctions,
-          registerFunction: FunctionRegistry.registerFunction,
-          getLambda: FunctionRegistry.getLambda,
-          paramTypes: Types.PARAM_TYPES,
-          inferType: Types.inferType,
+          el.addEventListener(event, listenerCallback);
+          if (nodeId in listeners) {
+            listeners[nodeId].push({ event, listenerCallback });
+          } else {
+            listeners[nodeId] = [{ event, listenerCallback }];
+          }
+
+          return { valueNode, functionNode };
         };
-      })();
 
-      const Main = (() => {
-        const loadFuncDefs = (funcs) => {
-          funcs.forEach((funcDef) => {
-            StateManager.registerFunction(funcDef);
+        const cleanupListeners = (nodeId) => {
+          if (nodeId in listeners) {
+            listeners[nodeId].forEach(({ event, listenerCallback }) =>
+              el.removeEventListener(event, listenerCallback)
+            );
+          }
+        };
+
+        const updateNodes = (operations = []) => {
+          return new Promise((resolve) => {
+            requestAnimationFrame(() => {
+              operations.forEach(
+                ({
+                  id,
+                  action,
+                  tag,
+                  parentId,
+                  canvasOps = [],
+                  listeners = {},
+                  ...rest
+                }) => {
+                  const deleteNode = (id) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (NodeStore.getNode(id)) {
+                      getDownstreamNodes(id)
+                        .filter((n) => {
+                          const node = NodeStore.getNode(n);
+                          return (
+                            node?.type === Types.PARAM_TYPES.DOM_NODE &&
+                            listeners[n]
+                          );
+                        })
+                        .forEach(cleanupListeners);
+                    }
+
+                    el.remove();
+                  };
+
+                  const updateNode = (id, rest, tag, parentId) => {
+                    let el = document.getElementById(id);
+                    if (el) {
+                      Object.assign(el, rest);
+                    } else {
+                      el = Object.assign(document.createElement(tag), rest);
+                      el.id = id;
+                      const parent =
+                        document.getElementById(parentId) || document.body;
+                      parent.appendChild(el);
+                    }
+                    return el;
+                  };
+
+                  const updateCanvas = (el, canvasOps) => {
+                    const ctx = el.getContext("2d");
+                    canvasOps.forEach(({ method, ...args }) => {
+                      if (method === "set") {
+                        ctx[args.property] = args.value;
+                      } else {
+                        ctx[method](...args.args);
+                      }
+                    });
+                  };
+
+                  switch (action) {
+                    case DOM_ACTION.DELETE: {
+                      deleteNode(id);
+                      break;
+                    }
+
+                    case DOM_ACTION.UPSERT: {
+                      const el = updateNode(id, rest, tag, parentId);
+                      if (tag === "canvas") {
+                        updateCanvas(el, canvasOps);
+                      }
+
+                      if (listeners) {
+                        Object.entries(listeners).forEach(
+                          ([event, ...listenerConfig]) => {
+                            attachEventListener(el, event, ...listenerConfig);
+                          }
+                        );
+                      }
+                      break;
+                    }
+
+                    default:
+                      throw new Error(`Invalid DOM operation: ${action}`);
+                  }
+                }
+              );
+              resolve();
+            });
           });
         };
 
-        const loadNodeDefs = (nodes) => {
-          nodes.forEach((nodeDef) => {
-            StateManager.enqueue(nodeDef, "create");
-          });
+        return { updateNodes };
+      })();
+
+      const Calculator = (() => {
+        let isProcessing = false;
+        const queue = [];
+        const QUEUE_ACTION = {
+          UPSERT: "upsert",
+          DELETE: "delete",
+          ANIMATE: "animate",
         };
 
-        const init = (content) => {
-          loadFuncDefs(content.funcs);
-          loadNodeDefs(content.nodes);
+        const processDirtyNodes = async (level) => {
+          const results = await Promise.all(
+            level.map(async (nodeId) => {
+              const node = await NodeStore.calculateNode(nodeId);
+              return node;
+            })
+          );
+          return results;
+        };
+
+        const calculateFromNode = async (nodeId) => {
+          const topology = DependencyGraph.getDownstreamTopology(nodeId);
+
+          topology.flat().forEach((id) => NodeStore.dirtyNode(id));
+
+          const nodes = await topology.reduce(async (acc, level) => {
+            const updates = await processDirtyNodes(level);
+            return [...(await acc), ...updates];
+          }, Promise.resolve([]));
+
+          await DOMUpdator.updateNodes(
+            nodes
+              .filter((node) => node.type === Types.PARAM_TYPES.DOM_NODE)
+              .flatMap((node) => node.value)
+          );
+        };
+
+        const processQueue = async () => {
+          if (isProcessing) return;
+          isProcessing = true;
+          try {
+            while (queue.length) {
+              const { nodeConfig, action } = queue.shift();
+              const { nodeId, queueAction } = nodeConfig;
+
+              const upsertNode = async (nodeId) => {
+                const node = NodeStore.getNode(nodeId);
+                if (!node) {
+                  NodeStore.createNode(nodeConfig);
+                }
+                await calculateFromNode(nodeId);
+              };
+
+              switch (queueAction ? queueAction : action) {
+                case QUEUE_ACTION.UPSERT:
+                  await upsertNode(nodeId);
+                  break;
+                case QUEUE_ACTION.DELETE:
+                  NodeStore.removeNode(nodeId);
+                  break;
+                case QUEUE_ACTION.ANIMATE:
+                  await upsertNode(nodeId);
+                  queue.push({ nodeConfig, action: QUEUE_ACTION.ANIMATE });
+                  break;
+              }
+            }
+          } finally {
+            isProcessing = false;
+          }
+        };
+
+        const enqueue = (nodeConfig, action) => {
+          queue.push({ nodeConfig, action });
+          processQueue();
+        };
+
+        const stopAnimation = (nodeId) => {
+          const filteredQueue = queue.filter(
+            ({ nodeConfig, action }) =>
+              !(nodeConfig.nodeId === nodeId && action === QUEUE_ACTION.ANIMATE)
+          );
+
+          queue.length = 0;
+          queue.push(...filteredQueue);
+        };
+
+        const setQueue = (newQueue) => {
+          queue.length = 0;
+          queue.push(...newQueue);
+          processQueue();
         };
 
         return {
-          init,
+          setQueue,
+          enqueue,
+          stopAnimation,
+          isProcessing: () => isProcessing,
+          actionTypes: QUEUE_ACTION,
         };
       })();
 
-      document.addEventListener("DOMContentLoaded", () => {
-        const defaults = JSON.parse(
-          document.getElementById("defaults").textContent
-        );
-        Main.init(defaults);
-        const content = JSON.parse(
-          document.getElementById("siteContent").textContent
-        );
-        Main.init(content);
+      return {
+        setQueue: Calculator.setQueue,
+        enqueue: Calculator.enqueue,
+        stopAnimation: Calculator.stopAnimation,
+        createNode: NodeStore.createNode,
+        isProcessing: Calculator.isProcessing,
+        getNode: NodeStore.getNode,
+        getNodes: NodeStore.getNodes,
+        getGraphs: DependencyGraph.getGraphs,
+        getFunctions: FunctionRegistry.getFunctions,
+        registerFunction: FunctionRegistry.registerFunction,
+        getLambda: FunctionRegistry.getLambda,
+        paramTypes: Types.PARAM_TYPES,
+        inferType: Types.inferType,
+      };
+    })();
+
+    const Main = (() => {
+      const loadFuncDefs = (funcs) => {
+        funcs.forEach((funcDef) => {
+          StateManager.registerFunction(funcDef);
+        });
+      };
+
+      const loadNodeDefs = (nodes) => {
+        const queuePart = nodes.map((nodeConfig) => {
+          return {
+            nodeConfig,
+            action: nodeConfig.queueAction ? nodeConfig.queueAction : "upsert",
+          };
+        });
+        return queuePart;
+      };
+
+      const init = (content) => {
+        loadFuncDefs(content.funcs);
+        return loadNodeDefs(content.nodes);
+      };
+
+      return {
+        init,
+      };
+    })();
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const defaults = JSON.parse(
+        document.getElementById("defaults").textContent
+      );
+      Main.init(defaults);
+      const contents = JSON.parse(
+        document.getElementById("siteContent").textContent
+      );
+      const startQueue = contents.siteContent.flatMap((content) => {
+        const json = JSON.parse(document.getElementById(content).textContent);
+        return Main.init(json);
       });
-    </script>
-  </body>
+      StateManager.setQueue(startQueue);
+    });
+  </script>
 </html>
